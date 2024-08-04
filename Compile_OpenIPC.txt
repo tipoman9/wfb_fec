@@ -14,5 +14,16 @@ BOARD=ssc30kq_fpv make br-wifibroadcast-rebuild
 rm ./src/*.o
 /usr/bin/make -j9 CC="/home/home/src/ssc30kq/openipc-firmware/output/per-package/wifibroadcast/host/bin/arm-openipc-linux-gnueabihf-gcc" CXX="/home/home/src/ssc30kq/openipc-firmware/output/per-package/wifibroadcast/host/bin/arm-openipc-linux-gnueabihf-g++" -C /home/home/src/wfb_fec/wfb-ng/ wfb_tx
 
-
 scp -O /home/home/src/wfb_fec/wfb-ng/wfb_tx root@192.168.1.88:/usr/bin
+
+#will set FEC 2:4
+echo "2:4" >/tmp/FEC.wfb
+#will set FEC 8:10 and MCS index=3
+echo "8:10:3" >/tmp/FEC.wfb
+
+#will change only MCS index
+echo "0:0:4" >/tmp/FEC.wfb
+
+File is checked after every FEC block is sent. In a scanario with 8:12 FEC this means after every 12-th packet.
+If the rate is 1200 packets per second, typical for ~9Mbit/s video, this means refresh time is 10ms.
+

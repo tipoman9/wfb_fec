@@ -38,6 +38,7 @@ public:
     void send_session_key(void);
     virtual void select_output(int idx) = 0;
     void SetFEC(int k, int n);
+    uint8_t get_fragment_idx();
 protected:
     virtual void inject_packet(const uint8_t *buf, size_t size) = 0;
 

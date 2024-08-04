@@ -116,42 +116,60 @@ Transmitter::~Transmitter()
     fec_free(fec_p);
 }
 
-
+#define USE_PIPE 0
 
 static char FECFile[128]= "/tmp/FEC.wfb";  
 
-bool Check4FECMsg(int *K, int *N) {
-    bool res=false;
-   // int K=0, N=0;  
+#define FEC_Pipe "/tmp/FEC.wfb" // Path to the named pipe
+
+bool Check4FECMsg(int *K, int *N, int *M) {
+    bool res=false;   
     int result;
-    FILE *file = fopen(FECFile, "rb");
+    char msg_buf[22];
+    size_t bytesRead=0;
+    FILE *file=NULL;
+#if USE_PIPE     
+    int fd = open(FEC_Pipe, O_RDONLY | O_NONBLOCK);
+    if (fd == -1) // No file, no problem       
+      return false;      
+    bytesRead = read(fd, msg_buf, 20);//  named pipe    
+    close(fd);
+#else
+    
+    file = fopen(FECFile, "rb");
     if (file == NULL)// No file, no problem
-        return false;
-        
-    char msg_buf[20];
-    size_t bytesRead = fread(msg_buf, 1, 20 /*max buffer*/, file);
+        return false;            
+    bytesRead = fread(msg_buf, 1, 20 /*max buffer*/, file); //with files        
     fclose(file);
-    if (bytesRead > 0) {        		
-        	printf("FEC request from file:%s\n", msg_buf);
-            //try to parse the numbers
-            if (strlen(msg_buf) > 0 ){        
-                if (strchr(msg_buf, ':') != NULL) {            
-                    result = sscanf(msg_buf, "%d:%d", K, N);
-                    if (result == 2) {            
-                        printf("New FEC K:%d, N:%d\n", *K, *N); 
-                        res=true;           
-                    } else {
-                        printf("Failed to parse two numbers from the params.\n");
-                    }
+
+#endif    
+
+    if (bytesRead > 0) {  
+        msg_buf[bytesRead]=0;//end of string		
+        fprintf(stderr,"FEC request from file:%s\n", msg_buf);
+        //try to parse the numbers
+        if (strlen(msg_buf) > 0 ){        
+            if (strchr(msg_buf, ':') != NULL) {            
+                result = sscanf(msg_buf, "%d:%d:%d", K, N, M);
+                if (result == 3) {  
+                    fprintf(stderr,"New FEC K:%d, N:%d, MCS:%d\n", *K, *N, *M); 
+                    res=true;           
+                }else if (result == 2) {            
+                    fprintf(stderr,"New FEC K:%d, N:%d\n", *K, *N); 
+                    res=true;           
+                } else {
+                    fprintf(stderr,"Failed to parse two numbers from the params.\n");
                 }
             }
-        if (remove(FECFile) != 0)             
-        	printf("Error deleting file");        
-		return true;
-    } else 
-        printf("empty FEC file ?!\n");    
+        }
+        if (file != NULL)  
+            remove(FECFile);
+        	
+		return res;
+    } else {} 
+        //printf("empty FEC file ?!\n");    
 
-	return false;
+	return res;
 }
 
 
@@ -300,6 +318,10 @@ void Transmitter::send_session_key(void)
     inject_packet((uint8_t*)session_key_packet, sizeof(session_key_packet));
 }
 
+uint8_t Transmitter::get_fragment_idx()
+{
+    return fragment_idx;
+}
 void Transmitter::send_packet(const uint8_t *buf, size_t size, uint8_t flags)
 {
     wpacket_hdr_t packet_hdr;
@@ -448,18 +470,31 @@ void data_source(shared_ptr<Transmitter> &t, vector<int> &rx_fd, int poll_timeou
                     uint64_t cur_ts = get_time_ms();
                     if (cur_ts >= session_key_announce_ts)
                     {
-                        // Announce session key
-                        int K=0, N=0;
-                        if (Check4FECMsg(&K,&N)){
-                             //t->fec_k=K;
-                             //t->make_session_key();
-                             //t = shared_ptr<PcapTransmitter>(new PcapTransmitter(t->fec_k, n, keypair, epoch, channel_id, wlans));
+                        // Announce session key, but we may change FEC in the middle of a packet and this can break!
+                        /*
+                        int K=0, N=0, M=99;
+                        if (Check4FECMsg(&K,&N,&M)){                            
                              t->SetFEC(K,N);
+                             if (M>=0 && M<=20)
+                                radiotap_header[MCS_IDX_OFF] = M;
                         }
+                        */
                         t->send_session_key();
                         session_key_announce_ts = cur_ts + SESSION_KEY_ANNOUNCE_MSEC;
                     }
                     t->send_packet(buf, rsize, 0);
+
+                    if (t->get_fragment_idx()==0){//here we are supposed to be in the beginning of the next block
+                        int K=0, N=0, M=99;
+                        if (Check4FECMsg(&K,&N,&M)){ 
+                            if (K>0 && N>0)                           
+                                t->SetFEC(K,N);
+                            if (M>=0 && M<=20)
+                               radiotap_header[MCS_IDX_OFF] = M;
+                            t->send_session_key();
+                        }
+                    }
+
                 }
                 if (errno != EWOULDBLOCK) throw runtime_error(string_format("Error receiving packet: %s", strerror(errno)));
             }
@@ -540,7 +575,7 @@ int main(int argc, char * const *argv)
         case 'f':
             if (strcmp(optarg, "data") == 0)
             {
-                fprintf(stderr, "Using Data Frames\n");
+                fprintf(stderr, "Using data Frames\n");
                 ieee80211_header[0] = FRAME_TYPE_DATA;
             }
             else if (strcmp(optarg, "rts") == 0)
@@ -561,7 +596,7 @@ int main(int argc, char * const *argv)
             fprintf(stderr, "Default: K='%s', k=%d, n=%d, udp_port=%d, link_id=0x%06x, radio_port=%u, epoch=%" PRIu64 ", bandwidth=%d guard_interval=%s stbc=%d ldpc=%d mcs_index=%d, poll_timeout=%d, rcv_buf=system_default, frame_type=data, mirror=false\n",
                     keypair.c_str(), k, n, udp_port, link_id, radio_port, epoch, bandwidth, short_gi ? "short" : "long", stbc, ldpc, mcs_index, poll_timeout);
             fprintf(stderr, "Radio MTU: %lu\n", (unsigned long)MAX_PAYLOAD_SIZE);
-            fprintf(stderr, "WFB-ng version " WFB_VERSION " FEC change via file fec.wfb\n");
+            fprintf(stderr, "WFB-ng version " WFB_VERSION " FEC&MCS change via file /tmp/FEC.wfb\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
             exit(1);
         }
