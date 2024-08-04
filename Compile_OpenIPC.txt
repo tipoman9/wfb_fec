@@ -1,0 +1,18 @@
+#compile for desktop 
+make wfb_tx
+
+#compile as part of OpenIPC
+cp ./src/tx.* /home/home/src/ssc30kq/openipc-firmware/output/build/wifibroadcast-23.08/src/
+
+cd <OpenIPC>/output
+make wifibroadcast-rebuild
+or
+BOARD=ssc30kq_fpv make br-wifibroadcast-rebuild
+
+# to make manually
+#compile for OpenIPC
+rm ./src/*.o
+/usr/bin/make -j9 CC="/home/home/src/ssc30kq/openipc-firmware/output/per-package/wifibroadcast/host/bin/arm-openipc-linux-gnueabihf-gcc" CXX="/home/home/src/ssc30kq/openipc-firmware/output/per-package/wifibroadcast/host/bin/arm-openipc-linux-gnueabihf-g++" -C /home/home/src/wfb_fec/wfb-ng/ wfb_tx
+
+
+scp -O /home/home/src/wfb_fec/wfb-ng/wfb_tx root@192.168.1.88:/usr/bin

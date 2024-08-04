@@ -37,13 +37,14 @@ public:
     void send_packet(const uint8_t *buf, size_t size, uint8_t flags);
     void send_session_key(void);
     virtual void select_output(int idx) = 0;
+    void SetFEC(int k, int n);
 protected:
     virtual void inject_packet(const uint8_t *buf, size_t size) = 0;
 
 private:
     void send_block_fragment(size_t packet_size);
     void make_session_key(void);
-
+    
     fec_t* fec_p;
     int fec_k;  // RS number of primary fragments in block
     int fec_n;  // RS total number of fragments in block

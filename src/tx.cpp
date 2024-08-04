@@ -80,6 +80,30 @@ Transmitter::Transmitter(int k, int n, const string &keypair, uint64_t epoch, ui
 
     make_session_key();
 }
+void Transmitter::SetFEC(int k, int n) {
+    //Ugly release old FEC structure
+    for(int i=0; i < fec_n; i++)
+    {
+        delete block[i];
+    }
+    delete block;
+
+    fec_free(fec_p);
+
+//Ugly create new FEC structure
+    fec_k = k;
+    fec_n = n;
+
+    fec_p = fec_new(fec_k, fec_n);
+
+    block = new uint8_t*[fec_n];
+    for(int i=0; i < fec_n; i++)
+    {
+        block[i] = new uint8_t[MAX_FEC_PAYLOAD];
+    }
+    
+    make_session_key();
+}
 
 Transmitter::~Transmitter()
 {
@@ -90,6 +114,44 @@ Transmitter::~Transmitter()
     delete block;
 
     fec_free(fec_p);
+}
+
+
+
+static char FECFile[128]= "/tmp/FEC.wfb";  
+
+bool Check4FECMsg(int *K, int *N) {
+    bool res=false;
+   // int K=0, N=0;  
+    int result;
+    FILE *file = fopen(FECFile, "rb");
+    if (file == NULL)// No file, no problem
+        return false;
+        
+    char msg_buf[20];
+    size_t bytesRead = fread(msg_buf, 1, 20 /*max buffer*/, file);
+    fclose(file);
+    if (bytesRead > 0) {        		
+        	printf("FEC request from file:%s\n", msg_buf);
+            //try to parse the numbers
+            if (strlen(msg_buf) > 0 ){        
+                if (strchr(msg_buf, ':') != NULL) {            
+                    result = sscanf(msg_buf, "%d:%d", K, N);
+                    if (result == 2) {            
+                        printf("New FEC K:%d, N:%d\n", *K, *N); 
+                        res=true;           
+                    } else {
+                        printf("Failed to parse two numbers from the params.\n");
+                    }
+                }
+            }
+        if (remove(FECFile) != 0)             
+        	printf("Error deleting file");        
+		return true;
+    } else 
+        printf("empty FEC file ?!\n");    
+
+	return false;
 }
 
 
@@ -387,6 +449,13 @@ void data_source(shared_ptr<Transmitter> &t, vector<int> &rx_fd, int poll_timeou
                     if (cur_ts >= session_key_announce_ts)
                     {
                         // Announce session key
+                        int K=0, N=0;
+                        if (Check4FECMsg(&K,&N)){
+                             //t->fec_k=K;
+                             //t->make_session_key();
+                             //t = shared_ptr<PcapTransmitter>(new PcapTransmitter(t->fec_k, n, keypair, epoch, channel_id, wlans));
+                             t->SetFEC(K,N);
+                        }
                         t->send_session_key();
                         session_key_announce_ts = cur_ts + SESSION_KEY_ANNOUNCE_MSEC;
                     }
@@ -471,7 +540,7 @@ int main(int argc, char * const *argv)
         case 'f':
             if (strcmp(optarg, "data") == 0)
             {
-                fprintf(stderr, "Using data frames\n");
+                fprintf(stderr, "Using Data Frames\n");
                 ieee80211_header[0] = FRAME_TYPE_DATA;
             }
             else if (strcmp(optarg, "rts") == 0)
@@ -492,7 +561,7 @@ int main(int argc, char * const *argv)
             fprintf(stderr, "Default: K='%s', k=%d, n=%d, udp_port=%d, link_id=0x%06x, radio_port=%u, epoch=%" PRIu64 ", bandwidth=%d guard_interval=%s stbc=%d ldpc=%d mcs_index=%d, poll_timeout=%d, rcv_buf=system_default, frame_type=data, mirror=false\n",
                     keypair.c_str(), k, n, udp_port, link_id, radio_port, epoch, bandwidth, short_gi ? "short" : "long", stbc, ldpc, mcs_index, poll_timeout);
             fprintf(stderr, "Radio MTU: %lu\n", (unsigned long)MAX_PAYLOAD_SIZE);
-            fprintf(stderr, "WFB-ng version " WFB_VERSION "\n");
+            fprintf(stderr, "WFB-ng version " WFB_VERSION " FEC change via file fec.wfb\n");
             fprintf(stderr, "WFB-ng home page: <http://wfb-ng.org>\n");
             exit(1);
         }
